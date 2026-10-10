@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#2563eb" />
+    </linearGradient>
+  </defs>
+  <!-- Background with rounded corners for app icon -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" stroke="#334155" stroke-width="8"/>
+  
+  <!-- Thai decorative lotus / speech circle ring -->
+  <circle cx="256" cy="240" r="150" fill="none" stroke="url(#goldGrad)" stroke-width="6" opacity="0.4" stroke-dasharray="16 10"/>
+  <circle cx="256" cy="240" r="125" fill="#1e293b" opacity="0.6"/>
+
+  <!-- Microphone & Soundwave Graphic -->
+  <rect x="226" y="160" width="60" height="110" rx="30" fill="url(#goldGrad)"/>
+  <!-- Mic base arc -->
+  <path d="M196 225 C 196 280, 316 280, 316 225" fill="none" stroke="url(#goldGrad)" stroke-width="12" stroke-linecap="round"/>
+  <line x1="256" y1="280" x2="256" y2="320" stroke="url(#goldGrad)" stroke-width="12" stroke-linecap="round"/>
+  <line x1="216" y1="320" x2="296" y2="320" stroke="url(#goldGrad)" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- Audio Wave Bars left & right -->
+  <rect x="150" y="215" width="10" height="50" rx="5" fill="url(#glowGrad)"/>
+  <rect x="125" y="230" width="10" height="20" rx="5" fill="url(#glowGrad)" opacity="0.7"/>
+  <rect x="352" y="215" width="10" height="50" rx="5" fill="url(#glowGrad)"/>
+  <rect x="377" y="230" width="10" height="20" rx="5" fill="url(#glowGrad)" opacity="0.7"/>
+
+  <!-- Thai text สวัสดี (Sawasdee) at bottom -->
+  <text x="256" y="420" font-family="system-ui, -apple-system, sans-serif" font-weight="bold" font-size="52" fill="#fbbf24" text-anchor="middle" letter-spacing="2">สวัสดี</text>
+  <text x="256" y="460" font-family="system-ui, -apple-system, sans-serif" font-weight="600" font-size="22" fill="#94a3b8" text-anchor="middle" letter-spacing="4">SAWASDEE TALK</text>
+</svg>

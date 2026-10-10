@@ -1,0 +1,95 @@
+name: CI/CD - Build & Déploiement Automatisé
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: # Permet de relancer le déploiement manuellement en 1 clic depuis l'app GitHub sur mobile !
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Étape 1 : Vérification de la qualité du code et compilation
+  test-and-build:
+    name: 🧪 Validation & Compilation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Configurer Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Vérifier la cohérence TypeScript
+        run: npm run lint
+
+      - name: Compiler les assets de production (Vite)
+        run: npm run build
+
+  # Étape 2 : Déploiement automatique
+  deploy:
+    name: 🚀 Déploiement Automatique
+    needs: test-and-build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      # Déploiement via Webhook Render (si configuré dans les secrets GitHub)
+      - name: Déclencher le déploiement Render
+        if: env.RENDER_HOOK != ''
+        env:
+          RENDER_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          echo "🔄 Déclenchement du webhook de déploiement Render..."
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "${RENDER_HOOK}")
+          echo "$RESPONSE"
+          STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS" | cut -d':' -f2)
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 300 ]; then
+            echo "✅ Déploiement déclenché avec succès sur Render !"
+          else
+            echo "⚠️ Attention : le webhook a répondu avec le statut HTTP $STATUS"
+          fi
+
+      # Construction et publication automatique de l'image Docker sur GitHub Container Registry (GHCR)
+      - name: Connexion au registre GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extraire les métadonnées Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Construire et publier l'image Docker
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      # Résumé visuel dans GitHub Actions
+      - name: Rapport de Déploiement
+        run: |
+          echo "### 📱 Déploiement automatique réussi !" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Statut** : ✅ Code testé, validé et image Docker publiée sur \`ghcr.io/${{ github.repository }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Hébergement Render** : Si vous avez renseigné \`RENDER_DEPLOY_HOOK_URL\`, votre serveur se met à jour automatiquement." >> $GITHUB_STEP_SUMMARY
+          echo "- **Usage Mobile** : Ouvrez l'URL HTTPS sur votre smartphone et appuyez sur **« Ajouter à l'écran d'accueil »** pour l'utiliser comme une vraie application !" >> $GITHUB_STEP_SUMMARY

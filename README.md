@@ -65,12 +65,14 @@ Application Web moderne et réactive conçue pour les francophones débutants ou
 
 ---
 
-## 🚀 Publication sur GitHub
+## 🚀 Publication sur GitHub & Déploiement Automatisé
 
-Le projet est 100% prêt à être publié sur GitHub :
+Le projet est 100% prêt à être publié sur GitHub avec **déploiement automatisé continu** :
 - `.gitignore` est déjà configuré (vos clés API et fichiers `.env` ne seront **jamais** exposés).
-- Le build TypeScript et Vite compile sans aucune erreur.
-- La documentation et le Dockerfile sont prêts.
+- **GitHub Actions (`.github/workflows/deploy.yml`)** : teste, compile et déploie automatiquement à chaque `git push`.
+- **Zéro gestion sur mobile** : votre application s'installe en PWA sur votre smartphone (Android/iOS) en 1 clic et reste toujours à jour sans manipulation manuelle !
+- **Fichier Blueprint Render (`render.yaml`)** préconfiguré pour un hébergement gratuit avec HTTPS (requis pour le microphone).
+- Consultez le guide complet : **[DEPLOY.md](./DEPLOY.md)**.
 
 ### Pour publier sur votre compte GitHub :
 
