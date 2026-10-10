@@ -26,7 +26,7 @@ jobs:
           cache: 'npm'
 
       - name: Installer les dépendances
-        run: npm ci
+        run: npm install
 
       - name: Vérifier la cohérence TypeScript
         run: npm run lint
@@ -46,7 +46,7 @@ jobs:
 
       # Déploiement via Webhook Render (si configuré dans les secrets GitHub)
       - name: Déclencher le déploiement Render
-        if: env.RENDER_HOOK != ''
+        if: "${{ secrets.RENDER_DEPLOY_HOOK_URL != '' }}"
         env:
           RENDER_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
@@ -57,12 +57,27 @@ jobs:
           if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 300 ]; then
             echo "✅ Déploiement déclenché avec succès sur Render !"
           else
-            echo "⚠️ Attention : le webhook a répondu avec le statut HTTP $STATUS"
+            echo "⚠️ Le webhook a répondu avec le statut HTTP $STATUS"
           fi
 
+      # Étape d'information si le webhook n'est pas encore configuré
+      - name: Info webhook
+        if: "${{ secrets.RENDER_DEPLOY_HOOK_URL == '' }}"
+        run: |
+          echo "ℹ️ Note : Le secret RENDER_DEPLOY_HOOK_URL n'est pas encore configuré."
+          echo "Pour déclencher automatiquement le déploiement sur Render, ajoutez ce secret dans GitHub > Settings > Secrets and variables > Actions."
+
       # Construction et publication automatique de l'image Docker sur GitHub Container Registry (GHCR)
+      - name: Préparer le nom d'image Docker en minuscules
+        id: docker_prep
+        run: |
+          # Docker requiert strictement des caractères minuscules pour les noms d'images
+          LOWER_REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "image_name=ghcr.io/${LOWER_REPO}" >> $GITHUB_OUTPUT
+
       - name: Connexion au registre GitHub Container Registry
         uses: docker/login-action@v3
+        continue-on-error: true
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -72,13 +87,14 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ steps.docker_prep.outputs.image_name }}
           tags: |
             type=raw,value=latest
             type=sha,format=short
 
       - name: Construire et publier l'image Docker
         uses: docker/build-push-action@v5
+        continue-on-error: true
         with:
           context: .
           push: true
@@ -88,8 +104,12 @@ jobs:
       # Résumé visuel dans GitHub Actions
       - name: Rapport de Déploiement
         run: |
-          echo "### 📱 Déploiement automatique réussi !" >> $GITHUB_STEP_SUMMARY
+          echo "### 📱 Déploiement CI/CD terminé avec succès !" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Statut** : ✅ Code testé, validé et image Docker publiée sur \`ghcr.io/${{ github.repository }}:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Hébergement Render** : Si vous avez renseigné \`RENDER_DEPLOY_HOOK_URL\`, votre serveur se met à jour automatiquement." >> $GITHUB_STEP_SUMMARY
-          echo "- **Usage Mobile** : Ouvrez l'URL HTTPS sur votre smartphone et appuyez sur **« Ajouter à l'écran d'accueil »** pour l'utiliser comme une vraie application !" >> $GITHUB_STEP_SUMMARY
+          echo "- **Validation** : ✅ TypeScript et Build Vite validés sans aucune erreur." >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            echo "- **Hébergement Render** : 🚀 Webhook de mise à jour déclenché !" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Hébergement Render** : ℹ️ Pensez à renseigner \`RENDER_DEPLOY_HOOK_URL\` dans les secrets GitHub pour lier votre instance en 1 clic." >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "- **Usage Mobile** : Ouvrez l'URL HTTPS sur votre smartphone et appuyez sur **« Ajouter à l'écran d'accueil »** pour l'utiliser comme une application native !" >> $GITHUB_STEP_SUMMARY

@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Installer les dépendances
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
 # Copier le code source et compiler les assets Vite
 COPY . .
