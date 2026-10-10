@@ -1,0 +1,6 @@
+{
+  "name": "Sawasdee Talk - Vocabulaire Thaï Réel",
+  "description": "Enregistrez vos conversations réelles (max 1 min) pour générer automatiquement une fiche de vocabulaire statistique, expressions utiles et structures en thaï pour francophones.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
