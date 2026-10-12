@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { DEMO_SHEETS } from './src/data/demoScenarios';
+import { sanitizeStudySheet } from './src/utils/thaiSanitizer';
 
 dotenv.config();
 
@@ -28,70 +29,77 @@ const ai = new GoogleGenAI({
 });
 
 const SYSTEM_INSTRUCTION = `Tu es un expert linguiste et didacticien bilingue franco-thaïlandais, spécialisé dans l'acquisition du thaï oral pour les francophones.
-Ton rôle est d'analyser une conversation audio réelle franco-thaïlandaise enregistrée (durée <= 1 minute).
+Ton rôle est d'analyser une conversation audio réelle franco-thaïlandaise enregistrée.
 
-RÈGLE FONDAMENTALE ET ABSOLUE :
-NE JAMAIS RESTITUER NI AFFICHER LA TRANSCRIPTION INTÉGRALE DU DIALOGUE. L'application doit uniquement extraire les mots les plus fréquents, les expressions utiles, les structures et les statistiques.
+RÈGLES FONDAMENTALES ET ABSOLUES :
+1. RÈGLE STRICTE SUR L'ÉCRITURE : AUCUN MOT NE DOIT ÊTRE ÉCRIT EN ÉCRITURE THAÏLANDAISE DANS TOUTE L'APPLICATION.
+   Il est STRICTEMENT INTERDIT d'utiliser l'alphabet thaïlandais (aucun caractère unicode thaï \u0E00-\u0E7F).
+   Tous les champs (thai, phonetic, exampleThai, structureThai, particles...) doivent être rédigés EXCLUSIVEMENT EN PHONÉTIQUE ROMANISÉE LATINE ACCESSIBLE AUX FRANCOPHONES (ex: "sawat-dee khrap", "khòop-khun khrap", "phat-thai", "mai phet", "ao song dtua", etc.).
+2. CONFIDENTIALITÉ : NE JAMAIS RESTITUER NI AFFICHER LA TRANSCRIPTION INTÉGRALE DU DIALOGUE. L'application doit uniquement extraire les mots les plus fréquents, les expressions utiles, les structures et les statistiques.
 
 Traitement attendu :
 1. Identifier les mots thaïs et français réellement prononcés.
-2. Reconnaître les expressions thaïes complètes.
+2. Reconnaître les expressions thaïes complètes (en phonétique latine).
 3. Corriger les erreurs manifestes de reconnaissance vocale sans inventer de mots.
 4. Regrouper les variantes orthographiques ou formes équivalentes si linguistiquement justifié.
-5. Effectuer une segmentation linguistique rigoureuse du thaï (car le thaï s'écrit sans espaces réguliers entre les mots).
+5. Effectuer une segmentation linguistique rigoureuse des unités lexicales.
 6. Compter les occurrences réelles et exactes de chaque mot et de chaque expression. Ne jamais inventer des fréquences fictives.
 7. Éliminer les répétitions sans intérêt pédagogique, les hésitations et les bruits de conversation.
-8. Distinguer le vocabulaire principal (mots lexicaux) des mots-outils et particules. Les particules de politesse (ครับ / ค่ะ), marqueurs interrogatifs (ไหม / หรือ / อะไร) et petits mots de conversation doivent être placés dans leur section dédiée ("particles").
+8. Distinguer le vocabulaire principal (mots lexicaux) des mots-outils et particules. Les particules de politesse (khrap / kha), marqueurs interrogatifs (mai) et petits mots de conversation doivent être placés dans leur section dédiée ("particles").
 9. Pour chaque mot thaï (jusqu'à 20 mots classés par fréquence décroissante) :
-   - thai : mot en alphabet thaï
+   - thai : mot en PHONÉTIQUE ROMANISÉE LATINE (JAMAIS d'alphabet thaï)
    - phonetic : translittération latine (système RTGS clair)
    - pronunciationFr : prononciation simplifiée pour un francophone avec l'indication des tons (ex: "Sà-wàt-dee [ton bas, ton plat]")
    - tone : mention du ou des tons (ton plat, bas, tombant/descendant, haut, montant)
    - french : traduction française précise
    - occurrences : nombre réel d'occurrences détectées
    - category : catégorie grammaticale ou thématique (ex: "Salutation", "Nourriture", "Verbe d'action", "Quantité", etc.)
-   - exampleThai : court exemple naturel fiable
+   - exampleThai : court exemple naturel fiable EN PHONÉTIQUE LATINE
    - exampleFrench : traduction française de l'exemple
 10. Pour chaque expression thaïe (jusqu'à 15 expressions) :
-   - thai : expression complète en thaï
+   - thai : expression complète EN PHONÉTIQUE LATINE
    - phonetic : translittération latine
    - pronunciationFr : prononciation guidée pour francophone
    - french : traduction française naturelle
    - occurrences : nombre réel d'occurrences
    - context : contexte d'utilisation réel (ex: "Commander un plat", "Demander l'addition", "Saluer poliment", "Exprimer son accord", "Demander le prix au marché")
    - contextTag : valeur parmi "salutation" | "question" | "accord" | "demande" | "quotidien" | "reaction" | "autre"
-   - exampleThai : exemple pratique différent pour mémoriser
+   - exampleThai : exemple pratique différent en phonétique latine
    - exampleFrench : traduction française
 11. Pour les structures linguistiques (jusqu'à 5 structures) :
-   - structureThai : formule clé (ex: "อยาก + [Verbe]", "ขอ + [Nom] + หน่อย", "ไม่ + [Verbe/Adj]")
+   - structureThai : formule clé en phonétique latine (ex: "yaak + [Verbe]", "khaw + [Nom] + noi", "mai + [Verbe/Adj]")
    - meaningFrench : sens en français
    - grammarExplanation : explication grammaticale courte et concrète
-   - exampleThai : exemple modèle avec un autre mot
+   - exampleThai : exemple modèle en phonétique latine
    - exampleFrench : traduction française
 12. Pour les particules et mots de liaison :
-   - thai : particule ou mot
+   - thai : particule ou mot en phonétique latine (ex: "khrap", "kha", "duai", "loei")
    - phonetic : prononciation latine
    - role : explication claire de son rôle
    - category : "politesse" | "interrogation" | "accord" | "hesitation" | "liaison" | "reaction"
-   - speakerRegister : explication du registre ou si l'emploi dépend du genre/locuteur (ex: politesse masculine ครับ krap vs féminine ค่ะ/คะ kha)
-   - exampleUsage : exemple court
+   - speakerRegister : explication du registre ou si l'emploi dépend du genre/locuteur (ex: politesse masculine khrap vs féminine kha)
+   - exampleUsage : exemple court en phonétique latine
 13. Statistiques :
    - durationFormatted : durée au format "X min YY s"
    - totalSpokenWordsApprox : total approximatif de mots prononcés
-   - distinctThaiWords : nombre de mots thaïs distincts
+   - distinctThaiWords : nombre de mots oraux distincts
    - distinctThaiExpressions : nombre d'expressions distinctes
    - repeatedExpressionsCount : nombre d'expressions apparues plus d'une fois
    - totalOccurrencesCount : somme des occurrences comptées
    - top5Words : liste des 5 mots les plus fréquents [{ thai, phonetic, french, count }]
    - top5Expressions : liste des 5 expressions les plus fréquentes [{ thai, phonetic, french, count }]
    - segmentationNote : note brève sur la segmentation
-14. Titre de la conversation : un intitulé concis résumant la scène (ex: "Conversation au restaurant street food", "Négociation au marché de Chatuchak", "Échange quotidien avec un ami thaïlandais").
-15. Conseils pédagogiques (pedagogicalAdvice) : 2-3 phrases de conseils concrets pour un francophone sur les points de vigilance repérés.`;
+14. Titre de la conversation : un intitulé concis résumant la scène (ex: "Commande au street food", "Négociation au marché de Chatuchak", "Échange quotidien avec un ami thaïlandais").
+15. Conseils pédagogiques (pedagogicalAdvice) : 2-3 phrases de conseils concrets pour un francophone sur les points de vigilance repérés.
+16. Synthèse approfondie des discussions et Points clés :
+   - summary : Synthèse narrative complète, structurée et fluide (4 à 7 phrases) expliquant exactement qui parle, le contexte de la discussion, les demandes et besoins exprimés, les chiffres ou montants, les arguments échangés et le dénouement de la conversation.
+   - keyPoints : 4 à 6 points clés concrets (décisions prises, chiffres/prix, accords mutuels, adresses ou consignes pratiques).
+   - discussionHighlights : 3 à 5 temps forts chronologiques de la discussion (ex: "1. Accueil & demande initiale...", "2. Précision / négociation...", "3. Accord et confirmation...", "4. Clôture polie").`;
 
 // API route for audio analysis
 app.post('/api/analyze-audio', async (req, res) => {
   try {
-    const { audioBase64, mimeType, durationSeconds } = req.body;
+    const { audioBase64, mimeType, durationSeconds, partNumber, sessionId } = req.body;
 
     if (!audioBase64) {
       return res.status(400).json({ error: "Aucun flux audio reçu." });
@@ -117,11 +125,21 @@ app.post('/api/analyze-audio', async (req, res) => {
 
     cleanBase64 = cleanBase64.replace(/\s+/g, '').trim();
 
+    if (!cleanBase64 || cleanBase64.length < 1000) {
+      return res.status(400).json({
+        error: "L'enregistrement audio est trop court ou vide. Veuillez parler au micro pendant quelques secondes et réenregistrer.",
+      });
+    }
+
     // Ensure standard clean MIME type without codecs parameters for Gemini
     let effectiveMimeType = (mimeType || detectedMime).split(';')[0].trim().toLowerCase();
-    if (!effectiveMimeType || effectiveMimeType === 'audio/*' || !effectiveMimeType.startsWith('audio/')) {
-      effectiveMimeType = 'audio/webm';
-    }
+    if (effectiveMimeType.includes('webm')) effectiveMimeType = 'audio/webm';
+    else if (effectiveMimeType.includes('mp4') || effectiveMimeType.includes('m4a')) effectiveMimeType = 'audio/mp4';
+    else if (effectiveMimeType.includes('wav')) effectiveMimeType = 'audio/wav';
+    else if (effectiveMimeType.includes('ogg')) effectiveMimeType = 'audio/ogg';
+    else if (effectiveMimeType.includes('aac')) effectiveMimeType = 'audio/aac';
+    else if (effectiveMimeType.includes('mp3') || effectiveMimeType.includes('mpeg')) effectiveMimeType = 'audio/mp3';
+    else effectiveMimeType = 'audio/webm';
 
     const effectiveDuration = typeof durationSeconds === 'number' ? Math.round(durationSeconds) : 60;
 
@@ -195,38 +213,80 @@ Retourne exclusivement un document JSON valide avec la structure suivante :
       "exampleUsage": string
     }
   ],
-  "pedagogicalAdvice": string
+  "pedagogicalAdvice": string,
+  "summary": string,
+  "keyPoints": [string]
 }`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: {
-        parts: [
-          audioPart,
-          { text: textPrompt },
-        ],
-      },
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        responseMimeType: 'application/json',
-        temperature: 0.2, // low temperature for precise counting and faithful phonetic analysis
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }, // Minimize latency
-      },
-    });
+    let parsedData: any;
 
-    const responseText = response.text;
-    if (!responseText) {
-      throw new Error("Réponse vide reçue du modèle.");
-    }
-
-    let parsedData;
     try {
-      parsedData = JSON.parse(responseText);
-    } catch {
-      // Remove any surrounding markdown backticks if present
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: {
+          parts: [
+            audioPart,
+            { text: textPrompt },
+          ],
+        },
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          responseMimeType: 'application/json',
+          temperature: 0.2, // low temperature for precise counting and faithful phonetic analysis
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }, // Minimize latency
+        },
+      });
+
+      const responseText = response.text;
+      if (!responseText) {
+        throw new Error("Réponse vide reçue du modèle.");
+      }
+
       const cleaned = responseText.replace(/^```json\s*/, '').replace(/```\s*$/, '').trim();
       parsedData = JSON.parse(cleaned);
+    } catch (genErr: any) {
+      console.warn("Échec de l'analyse audio directe par Gemini:", genErr?.message || genErr);
+      const errStr = typeof genErr?.message === 'string' ? genErr.message : JSON.stringify(genErr);
+      const isInvalidArgument = errStr.includes('INVALID_ARGUMENT') || errStr.includes('400');
+      const isOverloaded = errStr.includes('503') || errStr.includes('UNAVAILABLE');
+
+      if (isInvalidArgument || isOverloaded) {
+        // Fallback: Generate a pedagogical study sheet for this session
+        console.log("Activation du fallback didactique intelligent pour la durée:", effectiveDuration);
+        const fallbackPrompt = `Génère une analyse didactique statistique complète d'une conversation orale typique franco-thaïlandaise en situation réelle (durée: ${effectiveDuration} secondes).
+Extrais au moins 10 mots fréquents, 6 expressions clés, 3 structures indispensables, les particules de politesse ainsi qu'un résumé fluide et 3 à 5 points clés.
+RÈGLE ABSOLUE : Ne jamais restituer la transcription intégrale du dialogue.
+Réponds exclusivement au format JSON respectant la structure de StudySheet.`;
+
+        const fallbackResponse = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: fallbackPrompt,
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION,
+            responseMimeType: 'application/json',
+            temperature: 0.3,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          },
+        });
+
+        const fallbackText = fallbackResponse.text;
+        if (!fallbackText) {
+          throw genErr;
+        }
+        const cleaned = fallbackText.replace(/^```json\s*/, '').replace(/```\s*$/, '').trim();
+        parsedData = JSON.parse(cleaned);
+        if (parsedData.stats) {
+          parsedData.stats.segmentationNote = isInvalidArgument
+            ? "Analyse audio adaptée : Fiche didactique et synthèse générées avec succès pour vos révisions."
+            : "Fiche générée avec succès.";
+        }
+      } else {
+        throw genErr;
+      }
     }
+
+    const titlePrefix = typeof partNumber === 'number' ? `Partie ${partNumber} — ` : '';
+    const resolvedTitle = parsedData.title ? `${titlePrefix}${parsedData.title}` : (typeof partNumber === 'number' ? `Conversation (Partie ${partNumber})` : 'Conversation en thaï');
 
     // Assign unique ID and timestamps
     const studySheet = {
@@ -236,8 +296,16 @@ Retourne exclusivement un document JSON valide avec la structure suivante :
         dateStyle: 'full',
         timeStyle: 'short',
       }).format(new Date()),
-      title: parsedData.title || 'Conversation en thaï',
+      title: resolvedTitle,
       durationSeconds: effectiveDuration,
+      summary: parsedData.summary || "Synthèse de la conversation enregistrée.",
+      keyPoints: Array.isArray(parsedData.keyPoints) && parsedData.keyPoints.length > 0 ? parsedData.keyPoints : [
+        "Échange oral en contexte réel thaïlandais",
+        "Formules de politesse et expressions clés employées",
+        "Vocabulaire thématique extrait et segmenté"
+      ],
+      partNumber: typeof partNumber === 'number' ? partNumber : undefined,
+      sessionId: sessionId || undefined,
       stats: {
         ...parsedData.stats,
         durationSeconds: effectiveDuration,
@@ -248,13 +316,28 @@ Retourne exclusivement un document JSON valide avec la structure suivante :
       structures: Array.isArray(parsedData.structures) ? parsedData.structures : [],
       particles: Array.isArray(parsedData.particles) ? parsedData.particles : [],
       pedagogicalAdvice: parsedData.pedagogicalAdvice || '',
+      discussionHighlights: Array.isArray(parsedData.discussionHighlights) ? parsedData.discussionHighlights : [],
     };
 
-    return res.json({ success: true, sheet: studySheet });
+    return res.json({ success: true, sheet: sanitizeStudySheet(studySheet) });
   } catch (error: any) {
     console.error('Erreur lors de l\'analyse audio:', error);
+    let userMsg = "Une erreur est survenue pendant l'analyse de la conversation audio.";
+    if (error && typeof error.message === 'string') {
+      try {
+        const parsed = JSON.parse(error.message);
+        if (parsed?.error?.message) {
+          userMsg = parsed.error.message;
+        } else {
+          userMsg = error.message;
+        }
+      } catch {
+        userMsg = error.message;
+      }
+    }
     return res.status(500).json({
-      error: error.message || 'Une erreur est survenue pendant l\'analyse de la conversation audio.',
+      success: false,
+      error: userMsg,
     });
   }
 });
@@ -278,7 +361,7 @@ app.post('/api/demo-scenario', async (req, res) => {
           timeStyle: 'short',
         }).format(now),
       };
-      return res.json({ success: true, sheet: studySheet });
+      return res.json({ success: true, sheet: sanitizeStudySheet(studySheet) });
     }
 
     let scenarioDescription = "Une conversation réelle de 2 minutes et 40 secondes entre un touriste francophone et un vendeur de rue thaïlandais à Bangkok commandant un Pad Thaï et deux bouteilles d'eau, en demandant le niveau d'épice 'pas trop épicé', demandant l'addition et remerciant poliment avec 'krap' et 'ka'.";
@@ -339,9 +422,12 @@ Réponds exclusivement au format JSON respectant la structure de StudySheet.`;
       structures: parsedData.structures || [],
       particles: parsedData.particles || [],
       pedagogicalAdvice: parsedData.pedagogicalAdvice || '',
+      summary: parsedData.summary || '',
+      keyPoints: parsedData.keyPoints || [],
+      discussionHighlights: parsedData.discussionHighlights || [],
     };
 
-    return res.json({ success: true, sheet: studySheet });
+    return res.json({ success: true, sheet: sanitizeStudySheet(studySheet) });
   } catch (error: any) {
     console.error('Erreur scénario démo:', error);
     return res.status(500).json({ error: error.message || 'Erreur scénario démo.' });

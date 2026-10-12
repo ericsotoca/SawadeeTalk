@@ -1,4 +1,5 @@
 import { StudySheet, WordItem, ExpressionItem, StructureItem, ParticleItem } from '../types';
+import { sanitizeStudySheet } from './thaiSanitizer';
 
 /**
  * Parses exported .txt files (or JSON backups) back into a fully formed StudySheet.
@@ -276,7 +277,7 @@ export function parseStudySheetFromText(rawText: string, filename: string = 'fic
       pedagogicalAdvice: 'Fiche d\'expressions restaurée avec succès.',
     };
 
-    return sheet;
+    return sanitizeStudySheet(sheet);
   } catch (err) {
     console.warn('Erreur parsing fiche:', err);
     return null;

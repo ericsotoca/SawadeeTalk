@@ -640,7 +640,7 @@ export const FlashcardsView: React.FC<FlashcardsViewProps> = ({
 
                     {/* Audio button to listen to native pronunciation */}
                     <button
-                      onClick={(e) => handlePlayAudio(currentCard.thai, e)}
+                      onClick={(e) => handlePlayAudio(currentCard.phonetic || currentCard.thai, e)}
                       className={`p-2.5 rounded-xl border transition cursor-pointer shadow-md ${
                         playingAudio
                           ? 'bg-amber-500 text-slate-950 border-amber-400 animate-pulse'
@@ -679,6 +679,19 @@ export const FlashcardsView: React.FC<FlashcardsViewProps> = ({
                   <p className="text-xs text-slate-500 pt-2 italic">
                     Pensez ou prononcez l'expression à voix haute avec ses tons...
                   </p>
+                  <div className="pt-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsFlipped(true);
+                        handlePlayAudio(currentCard.phonetic || currentCard.thai);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 font-semibold text-xs border border-amber-500/30 transition cursor-pointer"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>Afficher & écouter la prononciation</span>
+                    </button>
+                  </div>
                 </div>
               )
             ) : (
@@ -690,7 +703,7 @@ export const FlashcardsView: React.FC<FlashcardsViewProps> = ({
                     {currentCard.phonetic}
                   </span>
                   <button
-                    onClick={(e) => handlePlayAudio(currentCard.thai, e)}
+                    onClick={(e) => handlePlayAudio(currentCard.phonetic || currentCard.thai, e)}
                     className="p-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition cursor-pointer shadow-md"
                     title="Réécouter la prononciation"
                   >

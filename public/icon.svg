@@ -33,7 +33,7 @@
   <rect x="352" y="215" width="10" height="50" rx="5" fill="url(#glowGrad)"/>
   <rect x="377" y="230" width="10" height="20" rx="5" fill="url(#glowGrad)" opacity="0.7"/>
 
-  <!-- Thai text สวัสดี (Sawasdee) at bottom -->
-  <text x="256" y="420" font-family="system-ui, -apple-system, sans-serif" font-weight="bold" font-size="52" fill="#fbbf24" text-anchor="middle" letter-spacing="2">สวัสดี</text>
-  <text x="256" y="460" font-family="system-ui, -apple-system, sans-serif" font-weight="600" font-size="22" fill="#94a3b8" text-anchor="middle" letter-spacing="4">SAWASDEE TALK</text>
+  <!-- Romanized title at bottom -->
+  <text x="256" y="430" font-family="system-ui, -apple-system, sans-serif" font-weight="900" font-size="44" fill="#fbbf24" text-anchor="middle" letter-spacing="3">SAWASDEE</text>
+  <text x="256" y="465" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="20" fill="#94a3b8" text-anchor="middle" letter-spacing="4">TALK</text>
 </svg>

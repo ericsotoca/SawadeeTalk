@@ -71,6 +71,17 @@ export interface StudySheet {
   structures: StructureItem[];
   particles: ParticleItem[];
   pedagogicalAdvice?: string;
+  summary?: string;
+  keyPoints?: string[];
+  discussionHighlights?: string[];
+  partNumber?: number;
+  sessionId?: string;
+}
+
+export interface RecordingSettings {
+  chunkDurationMinutes: number; // 1 to 5 minutes
+  stealthModeEnabled: boolean;
+  decoyScreen: 'notes' | 'converter' | 'article';
 }
 
 export interface FlashcardItem {

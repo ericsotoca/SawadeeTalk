@@ -1,9 +1,10 @@
 import { StudySheet } from '../types';
+import { removeThaiScript } from './thaiSanitizer';
 
 /**
  * Formats a StudySheet into clean, readable UTF-8 text suitable for
  * Windows, Android, Google Docs, and plain text editors.
- * Guarantees that NO full dialogue transcript is included.
+ * Guarantees that NO Thai script characters are included, and NO full dialogue transcript.
  */
 export function formatStudySheetToText(sheet: StudySheet): string {
   const lines: string[] = [];
@@ -12,55 +13,80 @@ export function formatStudySheetToText(sheet: StudySheet): string {
   const subDivider = '-'.repeat(68);
 
   lines.push(divider);
-  lines.push(` FICHE D'APPRENTISSAGE DU THAÏ — CONVERSATION RÉELLE`);
-  lines.push(` Sawasdee Talk — Analyse Lexicale et Pédagogique`);
+  lines.push(` FICHE D'APPRENTISSAGE DU THAÏ ORAL — CONVERSATION RÉELLE`);
+  lines.push(` Sawasdee Talk — Phonétique Romane, Tons et Synthèse Orale`);
   lines.push(divider);
   lines.push('');
   lines.push(`Date de la conversation   : ${sheet.dateFormatted}`);
   lines.push(`Durée analysée            : ${sheet.stats.durationFormatted} (${sheet.stats.durationSeconds}s)`);
-  lines.push(`Thème / Contexte          : ${sheet.title}`);
-  lines.push(`Règle de confidentialité : Aucune transcription intégrale n'est restituée.`);
+  lines.push(`Thème / Contexte          : ${removeThaiScript(sheet.title)}`);
+  if (sheet.partNumber) {
+    lines.push(`Segment / Découpage       : Partie ${sheet.partNumber}`);
+  }
+  lines.push(`Règles strictes           : 100% phonétique latine (aucun alphabet thaï)`);
+  lines.push(`Confidentialité           : Aucune transcription continue du dialogue`);
   lines.push('');
+
+  // RÉSUMÉ ET POINTS CLÉS
+  if (sheet.summary || (sheet.keyPoints && sheet.keyPoints.length > 0)) {
+    lines.push(divider);
+    lines.push(`RÉSUMÉ ET POINTS CLÉS DE LA CONVERSATION`);
+    lines.push(divider);
+    if (sheet.summary) {
+      lines.push(`[Résumé synthétique]`);
+      lines.push(removeThaiScript(sheet.summary));
+      lines.push('');
+    }
+    if (sheet.keyPoints && sheet.keyPoints.length > 0) {
+      lines.push(`[Points clés essentiels]`);
+      sheet.keyPoints.forEach((kp) => {
+        lines.push(`  • ${removeThaiScript(kp)}`);
+      });
+      lines.push('');
+    }
+  }
 
   // 1. STATISTIQUES
   lines.push(divider);
   lines.push(`1. STATISTIQUES DE LA CONVERSATION`);
   lines.push(divider);
   lines.push(`• Mots totaux approximatifs prononcés : ${sheet.stats.totalSpokenWordsApprox}`);
-  lines.push(`• Mots thaïs distincts identifiés     : ${sheet.stats.distinctThaiWords}`);
+  lines.push(`• Mots oraux distincts identifiés     : ${sheet.stats.distinctThaiWords}`);
   lines.push(`• Expressions distinctes identifiées  : ${sheet.stats.distinctThaiExpressions}`);
   lines.push(`• Expressions répétées                : ${sheet.stats.repeatedExpressionsCount}`);
   lines.push(`• Total des occurrences comptabilisées: ${sheet.stats.totalOccurrencesCount}`);
   if (sheet.stats.segmentationNote) {
-    lines.push(`• Note linguistique                   : ${sheet.stats.segmentationNote}`);
+    lines.push(`• Note linguistique                   : ${removeThaiScript(sheet.stats.segmentationNote)}`);
   }
   lines.push('');
   lines.push(`[Top 5 Mots les plus fréquents]`);
   sheet.stats.top5Words.forEach((w, i) => {
-    lines.push(`  ${i + 1}. ${w.thai} (${w.phonetic}) — "${w.french}" : ${w.count} occurrence(s)`);
+    const phoneticWord = removeThaiScript(w.phonetic || w.thai);
+    lines.push(`  ${i + 1}. ${phoneticWord} — "${w.french}" : ${w.count} occurrence(s)`);
   });
   lines.push('');
   lines.push(`[Top 5 Expressions les plus fréquentes]`);
   sheet.stats.top5Expressions.forEach((e, i) => {
-    lines.push(`  ${i + 1}. ${e.thai} (${e.phonetic}) — "${e.french}" : ${e.count} occurrence(s)`);
+    const phoneticExp = removeThaiScript(e.phonetic || e.thai);
+    lines.push(`  ${i + 1}. ${phoneticExp} — "${e.french}" : ${e.count} occurrence(s)`);
   });
   lines.push('');
 
-  // 2. MOTS THAÏS LES PLUS UTILISÉS
+  // 2. MOTS LES PLUS UTILISÉS
   lines.push(divider);
-  lines.push(`2. MOTS THAÏS LES PLUS UTILISÉS (Classés par fréquence décroissante)`);
+  lines.push(`2. MOTS LES PLUS UTILISÉS (Classés par fréquence décroissante)`);
   lines.push(divider);
   if (sheet.words.length === 0) {
     lines.push(`Aucun mot distinct isolé répertorié.`);
   } else {
     sheet.words.forEach((w, index) => {
-      lines.push(`${index + 1}. [${w.occurrences} occurrence(s)]  ${w.thai}`);
-      lines.push(`   Phonétique (RTGS) : ${w.phonetic}`);
+      const phoneticWord = removeThaiScript(w.phonetic || w.thai);
+      lines.push(`${index + 1}. [${w.occurrences} occurrence(s)]  ${phoneticWord}`);
       lines.push(`   Prononciation FR  : ${w.pronunciationFr} (${w.tone})`);
       lines.push(`   Sens en français  : ${w.french}`);
       if (w.category) lines.push(`   Catégorie         : ${w.category}`);
       if (w.exampleThai) {
-        lines.push(`   Exemple naturel   : ${w.exampleThai}`);
+        lines.push(`   Exemple oral      : ${removeThaiScript(w.exampleThai)}`);
         lines.push(`   Traduction exemple: ${w.exampleFrench}`);
       }
       lines.push(subDivider);
@@ -68,21 +94,21 @@ export function formatStudySheetToText(sheet: StudySheet): string {
   }
   lines.push('');
 
-  // 3. EXPRESSIONS THAÏES LES PLUS UTILISÉES
+  // 3. EXPRESSIONS LES PLUS UTILES
   lines.push(divider);
-  lines.push(`3. EXPRESSIONS THAÏES LES PLUS UTILES`);
+  lines.push(`3. EXPRESSIONS LES PLUS UTILES`);
   lines.push(divider);
   if (sheet.expressions.length === 0) {
     lines.push(`Aucune expression distincte répertoriée.`);
   } else {
     sheet.expressions.forEach((e, index) => {
-      lines.push(`${index + 1}. [${e.occurrences} occurrence(s)]  ${e.thai}`);
-      lines.push(`   Phonétique (RTGS) : ${e.phonetic}`);
+      const phoneticExp = removeThaiScript(e.phonetic || e.thai);
+      lines.push(`${index + 1}. [${e.occurrences} occurrence(s)]  ${phoneticExp}`);
       lines.push(`   Prononciation FR  : ${e.pronunciationFr}`);
       lines.push(`   Traduction        : ${e.french}`);
       lines.push(`   Contexte d'emploi : ${e.context}`);
       if (e.exampleThai) {
-        lines.push(`   Exemple pratique  : ${e.exampleThai}`);
+        lines.push(`   Exemple pratique  : ${removeThaiScript(e.exampleThai)}`);
         lines.push(`   Traduction exemple: ${e.exampleFrench}`);
       }
       lines.push(subDivider);
@@ -98,11 +124,13 @@ export function formatStudySheetToText(sheet: StudySheet): string {
     lines.push(`Aucune structure particulière relevée.`);
   } else {
     sheet.structures.forEach((s, index) => {
-      lines.push(`Structure ${index + 1} : ${s.structureThai}`);
+      lines.push(`Structure ${index + 1} : ${removeThaiScript(s.structureThai)}`);
       lines.push(`Signification         : ${s.meaningFrench}`);
       lines.push(`Règle grammaticale    : ${s.grammarExplanation}`);
-      lines.push(`Exemple réutilisable  : ${s.exampleThai}`);
-      lines.push(`Traduction de l'ex.   : ${s.exampleFrench}`);
+      if (s.exampleThai) {
+        lines.push(`Exemple réutilisable  : ${removeThaiScript(s.exampleThai)}`);
+        lines.push(`Traduction de l'ex.   : ${s.exampleFrench}`);
+      }
       lines.push(subDivider);
     });
   }
@@ -115,12 +143,13 @@ export function formatStudySheetToText(sheet: StudySheet): string {
   if (sheet.particles.length === 0) {
     lines.push(`Aucune particule répertoriée.`);
   } else {
-    sheet.particles.forEach((p, index) => {
-      lines.push(`• ${p.thai} (${p.phonetic}) [${p.category.toUpperCase()}]`);
+    sheet.particles.forEach((p) => {
+      const phoneticPart = removeThaiScript(p.phonetic || p.thai);
+      lines.push(`• ${phoneticPart} [${p.category.toUpperCase()}]`);
       lines.push(`  Rôle               : ${p.role}`);
       lines.push(`  Registre / Emploi  : ${p.speakerRegister}`);
       if (p.exampleUsage) {
-        lines.push(`  Exemple d'emploi   : ${p.exampleUsage}`);
+        lines.push(`  Exemple d'emploi   : ${removeThaiScript(p.exampleUsage)}`);
       }
       lines.push('');
     });
@@ -130,12 +159,12 @@ export function formatStudySheetToText(sheet: StudySheet): string {
     lines.push(divider);
     lines.push(`CONSEILS PÉDAGOGIQUES DU LINGUISTE`);
     lines.push(divider);
-    lines.push(sheet.pedagogicalAdvice);
+    lines.push(removeThaiScript(sheet.pedagogicalAdvice));
     lines.push('');
   }
 
   lines.push(divider);
-  lines.push(`Généré avec Sawasdee Talk — Conforme à l'apprentissage du thaï`);
+  lines.push(`Généré avec Sawasdee Talk — 100% Phonétique Orale (sans alphabet thaï)`);
   lines.push(divider);
 
   return lines.join('\n');

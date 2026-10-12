@@ -12,50 +12,134 @@ import {
   Volume2,
   ChevronRight,
   ShieldCheck,
+  EyeOff,
+  Settings2,
+  Scissors,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface AudioRecorderProps {
-  onAnalyzeAudio: (audioBase64: string, mimeType: string, durationSeconds: number) => void;
+  onAnalyzeAudio: (
+    audioBase64: string,
+    mimeType: string,
+    durationSeconds: number,
+    partNumber?: number,
+    sessionId?: string
+  ) => void;
   onSelectDemoScenario: (scenarioId: string) => void;
   isAnalyzing: boolean;
+  onEnterStealth?: () => void;
+  isInStealth?: boolean;
+  chunkDurationMinutes?: number;
+  onSetChunkDuration?: (minutes: number) => void;
+  continuousSegmenting?: boolean;
+  onToggleContinuous?: (enabled: boolean) => void;
+  autoStealthOnStart?: boolean;
+  onToggleAutoStealth?: (enabled: boolean) => void;
+  onOpenSettingsModal?: () => void;
 }
-
-const MAX_RECORDING_SECONDS = 60; // 1 minute
 
 export const AudioRecorder: React.FC<AudioRecorderProps> = ({
   onAnalyzeAudio,
   onSelectDemoScenario,
   isAnalyzing,
+  onEnterStealth,
+  isInStealth = false,
+  chunkDurationMinutes: propChunkDuration,
+  onSetChunkDuration: propOnSetChunkDuration,
+  continuousSegmenting: propContinuousSegmenting,
+  onToggleContinuous: propOnToggleContinuous,
+  autoStealthOnStart: propAutoStealthOnStart,
+  onToggleAutoStealth: propOnToggleAutoStealth,
+  onOpenSettingsModal,
 }) => {
+  // Configurable settings (stored in localStorage with fallback to props)
+  const [localChunkDurationMinutes, setLocalChunkDurationMinutes] = useState<number>(() => {
+    const saved = localStorage.getItem('sawasdee_chunk_min');
+    return saved ? parseInt(saved, 10) : 2; // Default 2 minutes
+  });
+  const [localAutoStealthOnStart, setLocalAutoStealthOnStart] = useState<boolean>(() => {
+    const saved = localStorage.getItem('sawasdee_auto_stealth');
+    return saved !== null ? saved === 'true' : true; // Default enabled
+  });
+  const [localContinuousSegmenting, setLocalContinuousSegmenting] = useState<boolean>(() => {
+    const saved = localStorage.getItem('sawasdee_continuous');
+    return saved !== null ? saved === 'true' : true; // Default enabled
+  });
+
+  const chunkDurationMinutes = propChunkDuration !== undefined ? propChunkDuration : localChunkDurationMinutes;
+  const autoStealthOnStart = propAutoStealthOnStart !== undefined ? propAutoStealthOnStart : localAutoStealthOnStart;
+  const continuousSegmenting = propContinuousSegmenting !== undefined ? propContinuousSegmenting : localContinuousSegmenting;
+
+  const handleSetChunkDuration = (minutes: number) => {
+    setLocalChunkDurationMinutes(minutes);
+    localStorage.setItem('sawasdee_chunk_min', minutes.toString());
+    if (propOnSetChunkDuration) propOnSetChunkDuration(minutes);
+  };
+
+  const handleToggleAutoStealth = (enabled: boolean) => {
+    setLocalAutoStealthOnStart(enabled);
+    localStorage.setItem('sawasdee_auto_stealth', enabled.toString());
+    if (propOnToggleAutoStealth) propOnToggleAutoStealth(enabled);
+  };
+
+  const handleToggleContinuous = (enabled: boolean) => {
+    setLocalContinuousSegmenting(enabled);
+    localStorage.setItem('sawasdee_continuous', enabled.toString());
+    if (propOnToggleContinuous) propOnToggleContinuous(enabled);
+  };
+
   const [recordingState, setRecordingState] = useState<'idle' | 'recording' | 'paused' | 'stopped'>('idle');
-  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [currentChunkSeconds, setCurrentChunkSeconds] = useState<number>(0);
+  const [totalSessionSeconds, setTotalSessionSeconds] = useState<number>(0);
+  const [currentPartNumber, setCurrentPartNumber] = useState<number>(1);
+  const [sessionId, setSessionId] = useState<string>('');
+  const [partsProcessedCount, setPartsProcessedCount] = useState<number>(0);
+
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioMimeType, setAudioMimeType] = useState<string>('audio/webm');
   const [volumeLevel, setVolumeLevel] = useState<number>(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [micPermissionDenied, setMicPermissionDenied] = useState<boolean>(false);
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
 
-  // References
+  // References for live stream & recording slices
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  const currentChunkBlobsRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
   const timerIntervalRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dictaphoneInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Timer updater
+  // Target seconds for each chunk (e.g., 1 min = 60s, 2 min = 120s, up to 5 min = 300s)
+  const maxChunkSeconds = chunkDurationMinutes * 60;
+
+  // Refs to guarantee freshest state in callbacks
+  const sessionIdRef = useRef<string>('');
+  const partNumberRef = useRef<number>(1);
+  const isHandingOverRef = useRef<boolean>(false);
+  const currentChunkSecondsRef = useRef<number>(0);
+  const recordingStateRef = useRef<'idle' | 'recording' | 'paused' | 'stopped'>('idle');
+  recordingStateRef.current = recordingState;
+  currentChunkSecondsRef.current = currentChunkSeconds;
+  sessionIdRef.current = sessionId;
+  partNumberRef.current = currentPartNumber;
+
+  // Timer loop for chunk tracking & auto-segmentation
   useEffect(() => {
     if (recordingState === 'recording') {
       timerIntervalRef.current = setInterval(() => {
-        setElapsedSeconds((prev) => {
+        setTotalSessionSeconds((prev) => prev + 1);
+        setCurrentChunkSeconds((prev) => {
           const next = prev + 1;
-          if (next >= MAX_RECORDING_SECONDS) {
-            stopRecording();
-            return MAX_RECORDING_SECONDS;
+          if (next >= maxChunkSeconds) {
+            // Cut and finalize current chunk segment!
+            handleChunkBoundaryReached();
+            return 0;
           }
           return next;
         });
@@ -67,7 +151,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     return () => {
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     };
-  }, [recordingState]);
+  }, [recordingState, maxChunkSeconds, continuousSegmenting]);
 
   // Clean up media streams and audio context on unmount
   useEffect(() => {
@@ -139,10 +223,110 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     }
   };
 
+  // Converts a Blob to Base64 and triggers automatic background analysis
+  const dispatchChunkForAnalysis = (
+    blob: Blob,
+    durationSec: number,
+    partNum: number,
+    currentSid: string,
+    explicitMime?: string
+  ) => {
+    if (!blob || blob.size < 1200) return;
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const raw = reader.result as string;
+      if (!raw) return;
+      const cleanBase64 = raw.includes(';base64,') ? raw.split(';base64,')[1] : raw;
+      const cleanMime = (explicitMime || blob.type || audioMimeType || 'audio/webm').split(';')[0].trim();
+      onAnalyzeAudio(cleanBase64, cleanMime, durationSec, partNum, currentSid);
+      setPartsProcessedCount((prev) => prev + 1);
+    };
+    reader.readAsDataURL(blob);
+  };
+
+  // Starts a distinct MediaRecorder instance for a specific part
+  const startRecorderInstance = (partNum: number) => {
+    if (!streamRef.current) return;
+    try {
+      const mime = getSupportedMimeType();
+      const options = mime ? { mimeType: mime } : undefined;
+      const recorder = new MediaRecorder(streamRef.current, options);
+      mediaRecorderRef.current = recorder;
+      currentChunkBlobsRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          currentChunkBlobsRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const recordedBlobs = [...currentChunkBlobsRef.current];
+        const finalBlob = new Blob(recordedBlobs, {
+          type: recorder.mimeType || mime || 'audio/webm',
+        });
+        const cleanMime = (recorder.mimeType || mime || 'audio/webm').split(';')[0].trim();
+        setAudioMimeType(cleanMime);
+
+        if (isHandingOverRef.current) {
+          // Handover chunk boundary reached (1-5 min)
+          isHandingOverRef.current = false;
+          if (finalBlob.size >= 1200) {
+            dispatchChunkForAnalysis(finalBlob, maxChunkSeconds, partNum, sessionIdRef.current, cleanMime);
+          }
+          // Seamlessly start the next part immediately on the same microphone stream!
+          if (recordingStateRef.current === 'recording') {
+            const nextPart = partNum + 1;
+            partNumberRef.current = nextPart;
+            setCurrentPartNumber(nextPart);
+            setCurrentChunkSeconds(0);
+            startRecorderInstance(nextPart);
+          }
+        } else {
+          // Final manual stop
+          setAudioBlob(finalBlob);
+          const url = URL.createObjectURL(finalBlob);
+          setAudioUrl(url);
+          // Auto-dispatch final segment if valid duration
+          if (finalBlob.size >= 1200 && currentChunkSecondsRef.current >= 2) {
+            dispatchChunkForAnalysis(
+              finalBlob,
+              Math.max(2, currentChunkSecondsRef.current),
+              partNum,
+              sessionIdRef.current,
+              cleanMime
+            );
+          }
+        }
+      };
+
+      recorder.start(1000); // Collect data chunks every 1 second
+    } catch (err: any) {
+      console.warn("Erreur démarrage instance enregistreur:", err);
+      setErrorMessage("Erreur d'initialisation du micro : " + (err?.message || err));
+    }
+  };
+
+  // Cut chunk when the time limit (1-5 min) is reached
+  const handleChunkBoundaryReached = () => {
+    if (!mediaRecorderRef.current || recordingStateRef.current !== 'recording') return;
+
+    if (continuousSegmenting) {
+      // Cleanly stop current recorder instance so it finalizes its WebM/MP4 container header & footer
+      isHandingOverRef.current = true;
+      mediaRecorderRef.current.stop();
+    } else {
+      // Single chunk mode: stop recorder
+      stopRecording();
+    }
+  };
+
   // Start recording
   const startRecording = async () => {
     setErrorMessage(null);
     setMicPermissionDenied(false);
+
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error("L'enregistrement audio n'est pas supporté par ce navigateur.");
@@ -157,39 +341,32 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       });
       streamRef.current = stream;
 
-      const mimeType = getSupportedMimeType();
-      const options = mimeType ? { mimeType } : undefined;
-      const recorder = new MediaRecorder(stream, options);
-
-      audioChunksRef.current = [];
-
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onstop = () => {
-        const finalBlob = new Blob(audioChunksRef.current, {
-          type: recorder.mimeType || mimeType || 'audio/webm',
-        });
-        setAudioBlob(finalBlob);
-        setAudioMimeType(recorder.mimeType || mimeType || 'audio/webm');
-        const url = URL.createObjectURL(finalBlob);
-        setAudioUrl(url);
-      };
-
-      mediaRecorderRef.current = recorder;
-      recorder.start(500); // 500ms chunks
+      const newSessionId = 'sess_' + Date.now();
+      setSessionId(newSessionId);
+      sessionIdRef.current = newSessionId;
+      setCurrentPartNumber(1);
+      partNumberRef.current = 1;
+      setPartsProcessedCount(0);
+      isHandingOverRef.current = false;
 
       startVisualizer(stream);
       setRecordingState('recording');
-      setElapsedSeconds(0);
+      recordingStateRef.current = 'recording';
+      setCurrentChunkSeconds(0);
+      setTotalSessionSeconds(0);
+
+      // Start first part recorder instance
+      startRecorderInstance(1);
+
+      // Immediately switch to stealth / decoy screen if enabled
+      if (autoStealthOnStart && onEnterStealth) {
+        onEnterStealth();
+      }
     } catch (err: any) {
-      console.warn("Accès microphone refusé ou non disponible :", err?.name || err?.message);
+      console.warn("Accès microphone refusé :", err?.name || err?.message);
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         setMicPermissionDenied(true);
-        setErrorMessage("L'accès au microphone a été refusé par le navigateur. Vous pouvez autoriser le micro, utiliser le dictaphone natif de votre téléphone, ou tester une démo.");
+        setErrorMessage("L'accès au micro a été refusé par le navigateur. Vous pouvez autoriser le micro ou importer un fichier audio.");
       } else {
         setErrorMessage(err.message || "Impossible d'accéder au microphone.");
       }
@@ -201,6 +378,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     if (mediaRecorderRef.current && recordingState === 'recording') {
       mediaRecorderRef.current.pause();
       setRecordingState('paused');
+      recordingStateRef.current = 'paused';
     }
   };
 
@@ -209,20 +387,24 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     if (mediaRecorderRef.current && recordingState === 'paused') {
       mediaRecorderRef.current.resume();
       setRecordingState('recording');
+      recordingStateRef.current = 'recording';
     }
   };
 
   // Stop recording manually
   const stopRecording = () => {
-    if (mediaRecorderRef.current && (recordingState === 'recording' || recordingState === 'paused')) {
+    isHandingOverRef.current = false;
+    setRecordingState('stopped');
+    recordingStateRef.current = 'stopped';
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-      }
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-      setRecordingState('stopped');
-      setVolumeLevel(0);
     }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+    }
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    setVolumeLevel(0);
   };
 
   // Reset / Discard recording
@@ -232,7 +414,11 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       URL.revokeObjectURL(audioUrl);
     }
     setRecordingState('idle');
-    setElapsedSeconds(0);
+    recordingStateRef.current = 'idle';
+    setCurrentChunkSeconds(0);
+    setTotalSessionSeconds(0);
+    setCurrentPartNumber(1);
+    setPartsProcessedCount(0);
     setAudioBlob(null);
     setAudioUrl(null);
     setVolumeLevel(0);
@@ -240,39 +426,34 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
     setMicPermissionDenied(false);
   };
 
-  // Trigger analysis
-  const handleAnalyze = async () => {
+  // Manual trigger for remaining audio chunk after stop
+  const handleFinalizeAndAnalyze = async () => {
     if (!audioBlob) {
       setErrorMessage("Aucun audio enregistré à analyser.");
       return;
     }
 
-    if (elapsedSeconds < 2) {
+    if (audioBlob.size < 1200) {
       setErrorMessage("L'enregistrement est trop court (minimum 2 secondes).");
       return;
     }
 
-    try {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const raw = reader.result as string;
-        const cleanBase64 = raw.includes(';base64,') ? raw.split(';base64,')[1] : raw;
-        const cleanMime = (audioMimeType || 'audio/webm').split(';')[0].trim();
-        onAnalyzeAudio(cleanBase64, cleanMime, elapsedSeconds);
-      };
-      reader.readAsDataURL(audioBlob);
-    } catch (err: any) {
-      setErrorMessage("Erreur de conversion audio : " + err.message);
-    }
+    dispatchChunkForAnalysis(
+      audioBlob,
+      Math.max(2, currentChunkSeconds),
+      currentPartNumber,
+      sessionId || sessionIdRef.current,
+      audioMimeType
+    );
   };
 
-  // Handle file upload fallback
+  // File upload fallback
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 40 * 1024 * 1024) {
-      setErrorMessage("Fichier audio trop lourd (maximum 40 Mo).");
+    if (file.size > 50 * 1024 * 1024) {
+      setErrorMessage("Fichier audio trop lourd (maximum 50 Mo).");
       return;
     }
 
@@ -281,41 +462,219 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
       const raw = reader.result as string;
       const cleanBase64 = raw.includes(';base64,') ? raw.split(';base64,')[1] : raw;
       const cleanMime = (file.type || 'audio/mp3').split(';')[0].trim();
-      // Estimate duration from file size or standard 30-60s
-      const estimatedSec = Math.min(60, Math.max(10, Math.round(file.size / 32000)));
-      onAnalyzeAudio(cleanBase64, cleanMime, estimatedSec);
+      const estimatedSec = Math.min(300, Math.max(10, Math.round(file.size / 32000)));
+      onAnalyzeAudio(cleanBase64, cleanMime, estimatedSec, 1, 'file_' + Date.now());
     };
     reader.readAsDataURL(file);
   };
 
-  // Formatting helpers
+  // Helpers
   const formatTime = (totalSec: number) => {
     const m = Math.floor(totalSec / 60);
     const s = totalSec % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const remainingSeconds = Math.max(0, MAX_RECORDING_SECONDS - elapsedSeconds);
-  const progressPercent = (elapsedSeconds / MAX_RECORDING_SECONDS) * 100;
+  const remainingSeconds = Math.max(0, maxChunkSeconds - currentChunkSeconds);
+  const progressPercent = Math.min(100, (currentChunkSeconds / maxChunkSeconds) * 100);
 
   return (
     <div className="w-full max-w-xl mx-auto space-y-6">
-      {/* Notice & Safety Banner */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 text-xs text-slate-300 flex items-start gap-3 backdrop-blur-sm">
-        <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-        <div className="space-y-1">
-          <p className="font-semibold text-slate-100">
-            Confidentialité & Respect Pédagogique
-          </p>
-          <p className="text-slate-400 leading-relaxed">
-            Conformément à la règle fondamentale : <span className="text-amber-300 font-medium">la conversation intégrale ne sera jamais restituée</span>. Seules les statistiques, les expressions réelles, les structures grammaticales et le vocabulaire utile sont extraits.
-          </p>
+      {/* Configuration directe de la Durée (1 à 5 min) */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 border-2 border-amber-500/40 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 relative overflow-hidden ring-1 ring-amber-500/20">
+        <div className="absolute top-0 right-0 w-40 h-40 bg-amber-500/15 rounded-full blur-2xl pointer-events-none" />
+        
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-500 text-slate-950 flex items-center justify-center font-black shadow-lg shadow-amber-500/25">
+              <Clock className="w-5 h-5 text-slate-950" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm sm:text-base font-extrabold text-white tracking-tight">
+                  Paramétrer la durée de l'enregistrement
+                </h3>
+                <span className="text-xs font-mono font-black px-2.5 py-0.5 rounded-full bg-amber-500 text-slate-950 shadow-sm">
+                  {chunkDurationMinutes} min active
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                Synthèse automatique de la discussion dès la durée choisie
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => (onOpenSettingsModal ? onOpenSettingsModal() : setShowSettingsModal(true))}
+            className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-sm ml-auto"
+            title="Consulter l'ensemble des paramètres"
+          >
+            <Settings2 className="w-3.5 h-3.5 text-amber-400" />
+            <span>Tous les paramètres</span>
+          </button>
+        </div>
+
+        {/* 1, 2, 3, 4, 5 min quick selector buttons */}
+        <div className="space-y-2 pt-1">
+          <div className="flex items-center justify-between text-xs text-slate-300">
+            <span className="font-semibold">Cliquez pour choisir la durée d'enregistrement :</span>
+            <span className="text-[11px] text-amber-400 font-mono font-medium">1 à 5 minutes</span>
+          </div>
+          <div className="grid grid-cols-5 gap-2 sm:gap-2.5">
+            {[1, 2, 3, 4, 5].map((m) => {
+              const isSelected = chunkDurationMinutes === m;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => handleSetChunkDuration(m)}
+                  disabled={recordingState === 'recording'}
+                  className={`py-3 sm:py-3.5 px-2 rounded-2xl text-xs sm:text-sm font-bold font-mono transition flex flex-col items-center justify-center gap-0.5 cursor-pointer ${
+                    isSelected
+                      ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/30 ring-2 ring-amber-400 ring-offset-2 ring-offset-slate-900 font-black scale-[1.03]'
+                      : 'bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:text-white'
+                  } ${recordingState === 'recording' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  <span className="text-base sm:text-xl font-black leading-tight">{m}</span>
+                  <span className="text-[10px] uppercase font-sans font-semibold">min</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-800">
+          <span className="flex items-center gap-1.5">
+            <Scissors className="w-3.5 h-3.5 text-orange-400" />
+            <span>Découpage continu : <strong className={continuousSegmenting ? 'text-emerald-400' : 'text-slate-400'}>{continuousSegmenting ? 'Oui (automatique)' : 'Non (arrêt à terme)'}</strong></span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <EyeOff className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Mode discret : <strong className={autoStealthOnStart ? 'text-emerald-400' : 'text-slate-400'}>{autoStealthOnStart ? 'Activé' : 'Désactivé'}</strong></span>
+          </span>
         </div>
       </div>
 
+      {/* Notice & Safety Banner */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 text-xs text-slate-300 flex items-start justify-between gap-3 backdrop-blur-sm">
+        <div className="flex items-start gap-3">
+          <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-semibold text-slate-100">
+              Discrétion & Synthèse Automatique
+            </p>
+            <p className="text-slate-400 leading-relaxed">
+              Tranches configurées de <strong className="text-amber-300">{chunkDurationMinutes} min</strong> avec découpage automatique continu et synthèse instantanée en résumé et points clés.
+            </p>
+          </div>
+        </div>
+
+        {/* Settings button */}
+        <button
+          onClick={() => (onOpenSettingsModal ? onOpenSettingsModal() : setShowSettingsModal(true))}
+          className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition cursor-pointer shrink-0"
+          title="Paramètres de durée et mode discret"
+        >
+          <Settings2 className="w-4 h-4 text-amber-400" />
+        </button>
+      </div>
+
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl animate-in fade-in duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Settings2 className="w-5 h-5 text-amber-400" />
+                <h3 className="text-base font-bold text-white">Paramètres d'enregistrement</h3>
+              </div>
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="text-slate-400 hover:text-white text-sm font-semibold p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Chunk Duration Selector */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span>Durée par tranche / découpage automatique</span>
+              </label>
+              <p className="text-[11px] text-slate-400 leading-normal">
+                Choisissez la durée d'une partie (1 à 5 minutes). À chaque échéance, la partie est automatiquement synthétisée en résumé et points clés.
+              </p>
+              <div className="grid grid-cols-5 gap-2 pt-1">
+                {[1, 2, 3, 4, 5].map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => handleSetChunkDuration(m)}
+                    className={`py-2.5 rounded-xl text-xs font-bold font-mono transition cursor-pointer ${
+                      chunkDurationMinutes === m
+                        ? 'bg-amber-500 text-slate-950 shadow-md ring-2 ring-amber-400/50'
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                    }`}
+                  >
+                    {m} min
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Continuous chunking toggle */}
+            <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3.5 flex items-start justify-between gap-3">
+              <div className="space-y-0.5">
+                <p className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                  <Scissors className="w-3.5 h-3.5 text-orange-400" />
+                  <span>Découpage continu en parties</span>
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Si la conversation continue, l'enregistrement se découpe automatiquement en Partie 1, Partie 2... sans interruption.
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={continuousSegmenting}
+                onChange={(e) => handleToggleContinuous(e.target.checked)}
+                className="w-5 h-5 accent-amber-500 mt-1 cursor-pointer"
+              />
+            </div>
+
+            {/* Auto-stealth toggle */}
+            <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3.5 flex items-start justify-between gap-3">
+              <div className="space-y-0.5">
+                <p className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                  <EyeOff className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Camouflage immédiat (Mode Discret)</span>
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Bascule instantanément sur une façade anodine (Notes/Mémos) dès le clic sur Enregistrer. Aucun symbole visible d'enregistrement.
+                </p>
+                <p className="text-[10px] text-amber-300/90 font-medium pt-1">
+                  💡 Un triple-clic n'importe où sur l'écran camouflé permet de revenir à la façade de départ.
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={autoStealthOnStart}
+                onChange={(e) => handleToggleAutoStealth(e.target.checked)}
+                className="w-5 h-5 accent-amber-500 mt-1 cursor-pointer"
+              />
+            </div>
+
+            <button
+              onClick={() => setShowSettingsModal(false)}
+              className="w-full py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition cursor-pointer"
+            >
+              Enregistrer les préférences
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Recording Console */}
       <div className="relative overflow-hidden bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-800/80 rounded-3xl p-6 sm:p-8 shadow-2xl">
-        {/* Subtle accent glow */}
         <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-72 h-72 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
 
         {/* Header / Step indicator */}
@@ -325,31 +684,56 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
               A
             </span>
             <h2 className="text-sm font-semibold tracking-wide uppercase text-slate-300">
-              Étape A — Enregistrer la conversation
+              Enregistrement & Synthèse
             </h2>
           </div>
-          <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5 text-amber-400" />
-            Max 1 min
-          </span>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 flex items-center gap-1.5 font-mono">
+              <Clock className="w-3.5 h-3.5 text-amber-400" />
+              Tranches de {chunkDurationMinutes} min
+            </span>
+
+            {/* Quick stealth button if already recording */}
+            {recordingState === 'recording' && onEnterStealth && (
+              <button
+                onClick={onEnterStealth}
+                className="py-1 px-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1 border border-slate-700 transition cursor-pointer"
+                title="Passer en mode discret (façade de notes)"
+              >
+                <EyeOff className="w-3 h-3 text-emerald-400" />
+                <span>Camoufler</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Timer & Gauge */}
         <div className="text-center py-4 space-y-3">
           <div className="inline-flex items-baseline gap-2">
             <span className="text-5xl sm:text-6xl font-black font-mono tracking-tight text-white drop-shadow-sm">
-              {formatTime(elapsedSeconds)}
+              {formatTime(currentChunkSeconds)}
             </span>
-            <span className="text-sm font-medium text-slate-400">
-              / 01:00
+            <span className="text-sm font-medium text-slate-400 font-mono">
+              / {formatTime(maxChunkSeconds)}
             </span>
           </div>
 
+          {/* Part status indicator */}
           <div className="flex items-center justify-center gap-2 text-xs font-medium text-slate-400">
-            <span>Temps restant :</span>
-            <span className={`font-mono font-semibold ${remainingSeconds < 15 ? 'text-rose-400 font-bold' : 'text-amber-400'}`}>
-              {formatTime(remainingSeconds)}
-            </span>
+            {recordingState === 'recording' ? (
+              <>
+                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold font-mono">
+                  Partie {currentPartNumber}
+                </span>
+                <span>• Temps restant dans cette partie :</span>
+                <span className="font-mono font-semibold text-amber-400">
+                  {formatTime(remainingSeconds)}
+                </span>
+              </>
+            ) : (
+              <span>Durée sélectionnée : {chunkDurationMinutes} minute{chunkDurationMinutes > 1 ? 's' : ''}</span>
+            )}
           </div>
 
           {/* Progress bar */}
@@ -363,6 +747,14 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
               style={{ width: `${progressPercent}%` }}
             />
           </div>
+
+          {/* Total session info */}
+          {totalSessionSeconds > 0 && (
+            <p className="text-[11px] text-slate-500 font-mono">
+              Temps total enregistré : {formatTime(totalSessionSeconds)}
+              {partsProcessedCount > 0 && ` • ${partsProcessedCount} partie(s) déjà synthétisée(s)`}
+            </p>
+          )}
         </div>
 
         {/* Audio Waveform / Visualizer */}
@@ -412,27 +804,44 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-200 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-4 w-4 bg-white"></span>
               </span>
-              Démarrer l'enregistrement
+              <span>Démarrer l'enregistrement</span>
+              {autoStealthOnStart && (
+                <span className="text-xs font-normal opacity-90 px-2 py-0.5 rounded-full bg-black/20">
+                  (Mode discret actif)
+                </span>
+              )}
             </button>
           )}
 
           {recordingState === 'recording' && (
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={pauseRecording}
-                className="py-3.5 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-[0.98] text-slate-200 font-semibold text-sm flex items-center justify-center gap-2 border border-slate-700 transition cursor-pointer"
-              >
-                <Pause className="w-4 h-4 text-amber-400" />
-                Mettre en pause
-              </button>
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={pauseRecording}
+                  className="py-3.5 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-[0.98] text-slate-200 font-semibold text-sm flex items-center justify-center gap-2 border border-slate-700 transition cursor-pointer"
+                >
+                  <Pause className="w-4 h-4 text-amber-400" />
+                  Mettre en pause
+                </button>
 
-              <button
-                onClick={stopRecording}
-                className="py-3.5 px-4 rounded-2xl bg-gradient-to-r from-orange-600 to-rose-600 hover:from-orange-500 hover:to-rose-500 active:scale-[0.98] text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-md transition cursor-pointer"
-              >
-                <Square className="w-4 h-4 fill-white" />
-                Arrêter
-              </button>
+                <button
+                  onClick={stopRecording}
+                  className="py-3.5 px-4 rounded-2xl bg-gradient-to-r from-orange-600 to-rose-600 hover:from-orange-500 hover:to-rose-500 active:scale-[0.98] text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-md transition cursor-pointer"
+                >
+                  <Square className="w-4 h-4 fill-white" />
+                  Arrêter
+                </button>
+              </div>
+
+              {onEnterStealth && (
+                <button
+                  onClick={onEnterStealth}
+                  className="w-full py-2.5 px-4 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-emerald-300 text-xs font-semibold flex items-center justify-center gap-2 border border-slate-700/60 transition cursor-pointer"
+                >
+                  <EyeOff className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Basculer sur l'écran discret (Carnet de notes)</span>
+                </button>
+              )}
             </div>
           )}
 
@@ -456,16 +865,16 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
             </div>
           )}
 
-          {/* Stopped state: Confirm & analyze or restart */}
+          {/* Stopped state */}
           {recordingState === 'stopped' && (
             <div className="space-y-3">
               <button
-                onClick={handleAnalyze}
+                onClick={handleFinalizeAndAnalyze}
                 disabled={isAnalyzing}
                 className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 active:scale-[0.98] text-white font-bold text-base flex items-center justify-center gap-3 shadow-lg shadow-emerald-500/20 transition-all cursor-pointer disabled:opacity-50"
               >
                 <Sparkles className="w-5 h-5 text-amber-200" />
-                Terminer et analyser la conversation
+                <span>Finaliser et synthétiser en résumé</span>
               </button>
 
               <button
@@ -474,7 +883,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
                 className="w-full py-3 px-4 rounded-2xl bg-slate-800/80 hover:bg-slate-700/80 active:scale-[0.98] text-slate-300 font-medium text-sm flex items-center justify-center gap-2 border border-slate-700/60 transition cursor-pointer"
               >
                 <RotateCcw className="w-4 h-4 text-slate-400" />
-                Recommencer l'enregistrement
+                Recommencer un nouvel enregistrement
               </button>
             </div>
           )}
@@ -487,10 +896,10 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
               <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
               <div className="space-y-1">
                 <p className="font-bold text-amber-300">
-                  Accès au microphone non autorisé dans ce navigateur
+                  Accès au microphone non autorisé
                 </p>
                 <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Pour enregistrer directement en ligne : vérifiez que le micro est autorisé dans l'icône de cadenas 🔒 de votre barre d'adresse.
+                  Autorisez le micro dans la barre d'adresse 🔒 de votre navigateur pour enregistrer en direct, ou utilisez un fichier audio.
                 </p>
               </div>
             </div>
@@ -501,7 +910,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
                 className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md"
               >
                 <Mic className="w-3.5 h-3.5" />
-                <span>Dictaphone natif (mobile)</span>
+                <span>Dictaphone natif</span>
               </button>
 
               <button
@@ -523,7 +932,6 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
 
       {/* Alternative Options: Import audio or Test instant scenario */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-        {/* File upload option */}
         <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-1">
@@ -531,7 +939,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
               <span>Importer un fichier audio</span>
             </div>
             <p className="text-[11px] text-slate-400 leading-normal">
-              Vous avez déjà un mémo vocal enregistré sur votre téléphone ? (.mp3, .wav, .m4a, .webm)
+              Mémo vocal enregistré au préalable (.mp3, .wav, .m4a, .webm).
             </p>
           </div>
           <button
@@ -548,7 +956,6 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
             onChange={handleFileUpload}
             className="hidden"
           />
-          {/* Native mobile dictaphone capture trigger */}
           <input
             ref={dictaphoneInputRef}
             type="file"
@@ -567,7 +974,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
               <span>Démos réelles pré-enregistrées</span>
             </div>
             <p className="text-[11px] text-slate-400 leading-normal">
-              Testez immédiatement sans micro avec des conversations réelles franco-thaïlandaises types.
+              Testez immédiatement la synthèse en résumé et points clés sans micro.
             </p>
           </div>
           <div className="mt-3 grid grid-cols-3 gap-1.5">
@@ -583,7 +990,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
               onClick={() => onSelectDemoScenario('market')}
               disabled={isAnalyzing}
               className="py-2 px-1 text-center rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-semibold text-slate-200 border border-slate-700/60 transition cursor-pointer disabled:opacity-40"
-              title="Négociation amicale au marché"
+              title="Négociation au marché"
             >
               🛍️ Marché
             </button>
@@ -591,7 +998,7 @@ export const AudioRecorder: React.FC<AudioRecorderProps> = ({
               onClick={() => onSelectDemoScenario('taxi')}
               disabled={isAnalyzing}
               className="py-2 px-1 text-center rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-semibold text-slate-200 border border-slate-700/60 transition cursor-pointer disabled:opacity-40"
-              title="Course de taxi & Itinéraire"
+              title="Course de taxi"
             >
               🚕 Taxi
             </button>

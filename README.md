@@ -1,4 +1,4 @@
-# Sawasdee Talk (สวัสดี) — Apprentissage du Thaï par la Conversation Réelle
+# Sawasdee Talk — Apprentissage du Thaï Oral par la Conversation Réelle
 
 Application Web moderne et réactive conçue pour les francophones débutants ou intermédiaires, permettant d'apprendre le thaï oral à partir de conversations réelles d'une minute maximum enregistrées au micro.
 
@@ -37,7 +37,7 @@ Application Web moderne et réactive conçue pour les francophones débutants ou
 - **Section 1 : Mots les plus utilisés (jusqu'à 20)** : alphabet thaï, phonétique RTGS, prononciation française avec tons, traduction, occurrences exactes, exemple naturel avec traduction, bouton audio.
 - **Section 2 : Expressions les plus utiles (jusqu'à 15)** : contexte réel d'emploi, filtres rapides par thématique (*Salutations, Questions, Accords, Demandes, etc.*), exemple pratique alternatif.
 - **Section 3 : Structures linguistiques (jusqu'à 5)** : formule clé en thaï, explication grammaticale concise, exemple modèle substituable.
-- **Section 4 : Particules et mots de liaison** : particules de politesse (*ครับ krap / ค่ะ ka* avec mention du registre et locuteur), marqueurs de question (*ไหม mai / หรือ reu*), réactions.
+- **Section 4 : Particules et mots de liaison** : particules de politesse (*khrap / kha* avec mention du registre et locuteur), marqueurs de question (*mai / reu*), réactions.
 
 ### Étape D — Flashcards Orales depuis l'Historique ou l'Import
 - Création automatique de paquets de flashcards pour réviser toutes les expressions de l'historique ou d'une conversation précise.
